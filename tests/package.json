@@ -1,0 +1,12 @@
+{
+  "name": "ghost-lab-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "E2E tests for Ghost Lab — runs in Docker, no local install needed",
+  "scripts": {
+    "test": "node test-e2e.js"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}

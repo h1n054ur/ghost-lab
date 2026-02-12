@@ -71,7 +71,7 @@ The entire attack chain uses only standard web technologies:
 
 ### What the Implant Can Do
 
-The implant (`hook.js`) is ~300 lines of vanilla JavaScript. No dependencies. No build step. It supports:
+The implant (`hook.js`) is a single vanilla JavaScript file. No dependencies. No build step. It supports:
 
 | Command | What It Does |
 |---------|-------------|
@@ -83,7 +83,7 @@ The implant (`hook.js`) is ~300 lines of vanilla JavaScript. No dependencies. No
 | `form_grab` | Intercept form submissions (captures credentials on submit) |
 | `exec_js` | Execute arbitrary JavaScript and return the result |
 | `inject_html` | Inject HTML/JS into the page DOM |
-| `portscan` | Timing-based port scan from the browser using `fetch()` |
+| `portscan` | Browser port scan using WebSocket timing heuristics |
 | `network_discovery` | Discover live hosts on a subnet from the browser |
 | `clipboard` | Read clipboard contents |
 | `redirect` | Silently redirect the victim to another page |
@@ -123,6 +123,22 @@ docker compose up -d --build
 | **DVWA** | http://localhost:8080 | Vulnerable web app — XSS injection target |
 | **Juice Shop** | http://localhost:3000 | OWASP Juice Shop — alternative target |
 | **BeEF** | http://localhost:3333/ui/panel | Browser Exploitation Framework (advanced) |
+
+### Run E2E Tests (Dockerized)
+
+Playwright is packaged as a Compose service, so contributors do not need Node/Playwright installed locally.
+
+```bash
+docker compose run --rm tests
+```
+
+By design, `tests` is in the `test` profile. It is part of the stack definition, but it does not auto-start with `docker compose up -d` because it is a one-shot runner, not a long-lived service.
+
+If you want it started via profile-aware up:
+
+```bash
+docker compose --profile test up --build tests
+```
 
 ### Run the Attack
 
@@ -167,6 +183,10 @@ docker compose down
 ```
 ghost-lab/
 ├── docker-compose.yaml          # Entire lab — one command startup
+├── tests/
+│   ├── Dockerfile               # Playwright + Chromium runner image
+│   ├── package.json             # Test dependencies
+│   └── test-e2e.js              # Full browser validation suite
 ├── c2/
 │   ├── Dockerfile               # Python 3.12 slim
 │   ├── requirements.txt         # Flask + Flask-CORS
@@ -178,7 +198,7 @@ ghost-lab/
 │       └── dashboard.html       # Operator dashboard
 ├── beef/
 │   └── config.yaml              # BeEF configuration
-└── test-chain.sh                # Automated chain validation
+└── test-chain.sh                # API/curl chain validation
 ```
 
 ## How the C2 Protocol Works
@@ -217,6 +237,12 @@ POST /api/result
 
 From a network perspective, this looks like a web app making API calls. The traffic is standard HTTP POST/GET with JSON bodies — indistinguishable from legitimate SPA traffic.
 
+## Engineering Notes (Important)
+
+- **Cross-origin sendBeacon exfiltration:** `sendBeacon` with `application/json` can fail cross-origin due to CORS preflight constraints. This lab uses `text/plain` payloads containing JSON for beacon-based form exfil, and server-side fallback JSON parsing on `/api/result`.
+- **Browser portscan limits:** WebSocket timing is more practical than `fetch(..., no-cors)` for browser-side scanning, but localhost scans can still produce false positives. Treat results as heuristic reconnaissance, not ground truth.
+- **C2 auto-discovery in hook.js:** The implant derives C2 origin from the script URL (`hook.js` source). This keeps payloads portable across localhost, Docker service names, and remote lab hosts.
+
 ## Key Concepts Demonstrated
 
 ### 1. The Browser Is the Endpoint
@@ -235,7 +261,7 @@ Every modern application makes HTTP requests. C2 traffic that uses standard HTTP
 From inside a browser, JavaScript can:
 - Read cookies and storage (session hijacking)
 - Capture keystrokes and form submissions (credential theft)
-- Scan internal networks using `fetch()` timing (reconnaissance)
+- Scan internal networks using browser timing heuristics (reconnaissance)
 - Modify the page DOM (phishing overlays)
 - Register Service Workers (persistence)
 - Make requests to internal services the browser can reach (pivoting)

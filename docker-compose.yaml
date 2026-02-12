@@ -65,6 +65,22 @@ services:
       - labnet
     restart: unless-stopped
 
+  # ─── E2E Tests (Playwright + Chromium) ───────────────────────
+  # Run: docker compose run tests
+  tests:
+    build: ./tests
+    container_name: ghost-tests
+    environment:
+      - C2_URL=http://ghost-c2:5000
+      - DVWA_URL=http://dvwa:80
+    networks:
+      - labnet
+    depends_on:
+      - dvwa
+      - ghost-c2
+    profiles:
+      - test
+
 networks:
   labnet:
     driver: bridge
