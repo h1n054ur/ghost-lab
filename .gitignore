@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.db
+*.sqlite3
+node_modules/
+.DS_Store
+Thumbs.db
+/tmp/
+*.log
+.opencode/
+_bmad/
+_bmad-output/

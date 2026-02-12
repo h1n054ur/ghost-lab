@@ -1,0 +1,70 @@
+###############################################################################
+# Ghost Lab — Browser-Based C2 Research Environment
+#
+# Services:
+#   - dvwa:        Vulnerable web app (XSS injection target)
+#   - juice-shop:  OWASP Juice Shop (alt target)
+#   - ghost-c2:    Custom C2 server (Flask) — operator dashboard + implant API
+#   - beef:        BeEF (Browser Exploitation Framework)
+#
+# Usage:
+#   docker compose up -d
+#   C2 Dashboard:  http://localhost:5000
+#   DVWA:          http://localhost:8080
+#   Juice Shop:    http://localhost:3000
+#   BeEF Panel:    http://localhost:3333/ui/panel  (ghost / ghostlab2026)
+###############################################################################
+
+name: ghost-lab
+
+services:
+
+  # ─── Target: DVWA ────────────────────────────────────────────────
+  dvwa:
+    image: vulnerables/web-dvwa
+    container_name: ghost-dvwa
+    ports:
+      - "8080:80"
+    networks:
+      - labnet
+    restart: unless-stopped
+
+  # ─── Target: Juice Shop ─────────────────────────────────────────
+  juice-shop:
+    image: bkimminich/juice-shop
+    container_name: ghost-juice
+    ports:
+      - "3000:3000"
+    networks:
+      - labnet
+    restart: unless-stopped
+
+  # ─── Ghost C2 Server ────────────────────────────────────────────
+  ghost-c2:
+    build: ./c2
+    container_name: ghost-c2
+    ports:
+      - "5000:5000"
+    networks:
+      - labnet
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+
+  # ─── BeEF Framework ─────────────────────────────────────────────
+  beef:
+    image: beefproject/beef
+    container_name: ghost-beef
+    ports:
+      - "3333:3000"
+      - "6789:6789"
+    volumes:
+      - ./beef/config.yaml:/beef/config.yaml:ro
+    networks:
+      - labnet
+    restart: unless-stopped
+
+networks:
+  labnet:
+    driver: bridge
