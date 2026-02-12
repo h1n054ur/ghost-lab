@@ -1,8 +1,19 @@
-# Ghost Lab
+# Ghost Lab — Browser Attack Surface C2 Research
 
-**A browser-based Command & Control research environment for studying how modern attacks use nothing but HTTP requests and JavaScript.**
+**A browser-native Command & Control research environment showing how XSS, Service Workers, and HTTP polling can turn a web session into a persistent post-exploitation channel.**
 
 > What if exploits didn't have to be complicated binaries — just something that sends HTTP requests silently, with all logic handled off the target?
+
+**Focus areas:** browser implant tradecraft, XSS-to-C2 chaining, session theft, credential capture, internal recon, and service-worker persistence.
+
+## Attack Surface Covered
+
+- **Client-side injection:** reflected/stored XSS as initial access
+- **Session layer abuse:** cookies, localStorage/sessionStorage, full DOM/page exfil
+- **Credential theft paths:** keylogging and submit-time form grabbing
+- **Browser-to-internal recon:** port scanning and local network discovery from victim context
+- **Execution and manipulation:** arbitrary JS execution, HTML/script injection, forced redirects
+- **Persistence and reach:** Service Worker re-hooking across navigation
 
 ## The Idea
 
